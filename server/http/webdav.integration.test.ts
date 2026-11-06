@@ -116,6 +116,9 @@ function basicHeaders(username: string, password: string, extra?: Record<string,
   return { Authorization: `Basic ${btoa(`${username}:${password}`)}`, ...extra }
 }
 
+// The caller's personal space is mounted at a fixed segment, independent of its display name.
+const PERSONAL_SEGMENT = 'personal'
+
 function escapedDavHref(name: string, path = '') {
   return `/dav/${encodeDavPathSegment(name)}/${path}`
 }
@@ -296,7 +299,7 @@ describe('WebDAV API', () => {
     const root = await app.request('/dav/', { method: 'PROPFIND', headers: basicHeaders(account.email, key) })
     expect(root.status).toBe(207)
     const rootXml = await root.text()
-    expect(rootXml).toContain(escapedDavHref(workspace.name))
+    expect(rootXml).toContain(escapedDavHref(PERSONAL_SEGMENT))
     expect(rootXml).not.toContain(`/dav/${encodeURIComponent(workspace.name).replaceAll("'", '&apos;')}/`)
 
     const rootWithoutSlash = await app.request('/dav', {
@@ -304,7 +307,7 @@ describe('WebDAV API', () => {
       headers: basicHeaders(account.email, key),
     })
     expect(rootWithoutSlash.status).toBe(207)
-    expect(await rootWithoutSlash.text()).toContain(escapedDavHref(workspace.name))
+    expect(await rootWithoutSlash.text()).toContain(escapedDavHref(PERSONAL_SEGMENT))
 
     const docs = await app.request(`/dav/${workspace.slug}/Docs`, {
       method: 'PROPFIND',
@@ -312,9 +315,11 @@ describe('WebDAV API', () => {
     })
     expect(docs.status).toBe(207)
     const xml = await docs.text()
-    expect(xml).toContain(escapedDavHref(workspace.name, 'Docs/'))
-    expect(xml).toContain(escapedDavHref(workspace.name, 'Docs/readme.txt'))
-    expect(xml).toContain(escapedDavHref(workspace.name, 'Docs/Miss%20Americana%20%26%20The%20Heartbreak%20Prince.txt'))
+    expect(xml).toContain(escapedDavHref(PERSONAL_SEGMENT, 'Docs/'))
+    expect(xml).toContain(escapedDavHref(PERSONAL_SEGMENT, 'Docs/readme.txt'))
+    expect(xml).toContain(
+      escapedDavHref(PERSONAL_SEGMENT, 'Docs/Miss%20Americana%20%26%20The%20Heartbreak%20Prince.txt'),
+    )
     expect(xml).toContain('<D:displayname>Miss Americana &amp; The Heartbreak Prince.txt</D:displayname>')
 
     const doubledMountSlash = await app.request(`/dav//${workspace.slug}/Docs`, {
@@ -364,7 +369,7 @@ describe('WebDAV API', () => {
       headers: basicHeaders(account.email, key),
     })
     const rootXml = await root.text()
-    const workspacePath = encodeDavPathSegment(workspace.name)
+    const workspacePath = encodeDavPathSegment(PERSONAL_SEGMENT)
     expect(root.status).toBe(207)
     expect(rootXml).toContain('<D:href>/</D:href>')
     expect(rootXml).toContain(`<D:href>/${workspacePath}/</D:href>`)
@@ -408,7 +413,7 @@ describe('WebDAV API', () => {
   it('PROPFIND mount root lists all member workspaces and hides non-member workspaces [spec: webdav/propfind-workspaces]', async () => {
     const { app, db, auth } = await createTestApp()
     await authedHeaders(app)
-    const workspace = await org(db)
+    await org(db)
     const account = await userAccount(db)
     const team = await teamWorkspace(db, { id: 'team-dav', slug: 'team-dav', userId: account.id, name: 'Team DAV' })
     const hidden = await teamWorkspace(db, { id: 'hidden-dav', slug: 'hidden-dav', name: 'Hidden DAV' })
@@ -417,7 +422,7 @@ describe('WebDAV API', () => {
     const root = await app.request('/dav/', { method: 'PROPFIND', headers: basicHeaders(account.email, key) })
     expect(root.status).toBe(207)
     const xml = await root.text()
-    expect(xml).toContain(escapedDavHref(workspace.name))
+    expect(xml).toContain(escapedDavHref(PERSONAL_SEGMENT))
     expect(xml).toContain(escapedDavHref(team.name))
     expect(xml).not.toContain(`/dav/${hidden.slug}/`)
 
@@ -426,6 +431,59 @@ describe('WebDAV API', () => {
       headers: basicHeaders(account.email, key),
     })
     expect(hiddenRes.status).toBe(404)
+  })
+
+  it('mounts the personal space at a fixed segment regardless of its display name', async () => {
+    const { app, db, auth } = await createTestApp()
+    await authedHeaders(app)
+    await seedStorage(db)
+    const workspace = await org(db)
+    const account = await userAccount(db)
+    const key = await apiKey(auth, account.id, { objects: ['read'] })
+    const displayName = "Jane O'Neil's Space"
+    await db.run(sql`UPDATE organization SET name = ${displayName} WHERE id = ${workspace.id}`)
+    await folder(db, workspace.id, { id: 'sync', name: 'sync' })
+
+    const root = await app.request('/dav/', { method: 'PROPFIND', headers: basicHeaders(account.email, key) })
+    expect(root.status).toBe(207)
+    const rootXml = await root.text()
+    expect(rootXml).toContain(escapedDavHref(PERSONAL_SEGMENT))
+    expect(rootXml).not.toContain(escapedDavHref(displayName))
+
+    const sync = await app.request(escapedDavHref(PERSONAL_SEGMENT, 'sync'), {
+      method: 'PROPFIND',
+      headers: basicHeaders(account.email, key),
+    })
+    expect(sync.status).toBe(207)
+    expect(await sync.text()).toContain(escapedDavHref(PERSONAL_SEGMENT, 'sync/'))
+
+    // Legacy URLs built from the display name keep resolving.
+    const legacy = await app.request(escapedDavHref(displayName, 'sync'), {
+      method: 'PROPFIND',
+      headers: basicHeaders(account.email, key),
+    })
+    expect(legacy.status).toBe(207)
+  })
+
+  it('falls back to slugs when a team is named like the personal segment', async () => {
+    const { app, db, auth } = await createTestApp()
+    await authedHeaders(app)
+    const workspace = await org(db)
+    const account = await userAccount(db)
+    const team = await teamWorkspace(db, {
+      id: 'team-personal',
+      slug: 'tpersonal',
+      userId: account.id,
+      name: 'personal',
+    })
+    const key = await apiKey(auth, account.id, { objects: ['read'] })
+
+    const root = await app.request('/dav/', { method: 'PROPFIND', headers: basicHeaders(account.email, key) })
+    expect(root.status).toBe(207)
+    const xml = await root.text()
+    expect(xml).toContain(escapedDavHref(workspace.slug))
+    expect(xml).toContain(escapedDavHref(team.slug))
+    expect(xml).not.toContain(escapedDavHref(PERSONAL_SEGMENT))
   })
 
   it('PROPFIND supports prop, propname, allprop include, explicit depths, and rejects infinity [spec: webdav/propfind-modes]', async () => {
@@ -460,7 +518,7 @@ describe('WebDAV API', () => {
     expect(propname.status).toBe(207)
     const propnameXml = await propname.text()
     expect(propnameXml).toContain('<D:displayname/>')
-    expect(propnameXml).toContain(escapedDavHref(workspace.name, 'Docs/readme.txt'))
+    expect(propnameXml).toContain(escapedDavHref(PERSONAL_SEGMENT, 'Docs/readme.txt'))
 
     const defaultNamespace = await app.request(`/dav/${workspace.slug}/Docs`, {
       method: 'PROPFIND',
@@ -2340,7 +2398,6 @@ describe('WebDAV over real HTTP (npm client)', () => {
   let auth: TestApp['auth']
   let server: ReturnType<typeof serve>
   let baseUrl: string
-  let workspaceName: string
   let workspaceSlug: string
   let username: string
   let apiKey: string
@@ -2363,7 +2420,6 @@ describe('WebDAV over real HTTP (npm client)', () => {
     if (!user || !workspace) throw new Error('Failed to seed WebDAV e2e user')
 
     username = user.email
-    workspaceName = workspace.name
     workspaceSlug = workspace.slug
     apiKey = (
       await (auth.api as { createApiKey(input: unknown): Promise<{ key: string }> }).createApiKey({
@@ -2403,7 +2459,7 @@ describe('WebDAV over real HTTP (npm client)', () => {
       body: allpropXml(),
     })
     expect(root.status).toBe(207)
-    expect(await root.text()).toContain(escapedDavHref(workspaceName))
+    expect(await root.text()).toContain(escapedDavHref(PERSONAL_SEGMENT))
 
     const mkcol = await dav('MKCOL', ws('/Albums'))
     expect(mkcol.status).toBe(201)
@@ -2544,7 +2600,7 @@ describe('WebDAV over real HTTP (npm client)', () => {
     const client = createClient(`${baseUrl}/dav`, { username, password: apiKey })
     const root = await client.getDirectoryContents('/')
     expect(root).toEqual(
-      expect.arrayContaining([expect.objectContaining({ filename: `/${workspaceName}`, type: 'directory' })]),
+      expect.arrayContaining([expect.objectContaining({ filename: `/${PERSONAL_SEGMENT}`, type: 'directory' })]),
     )
 
     const dir = `/${workspaceSlug}/Library Client`

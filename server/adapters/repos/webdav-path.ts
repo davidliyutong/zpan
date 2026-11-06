@@ -1,4 +1,5 @@
 import { ObjectStatus } from '@shared/constants'
+import { isPersonalOrgLike } from '@shared/org-slugs'
 import { and, asc, desc, eq, getTableColumns, isNull, or } from 'drizzle-orm'
 import { member, organization } from '../../db/auth-schema'
 import { matters } from '../../db/schema'
@@ -13,15 +14,20 @@ import {
   type WebDavWorkspace,
 } from '../../usecases/ports'
 
-type WorkspaceRow = Pick<WebDavWorkspace, 'id' | 'name' | 'slug'>
+type WorkspaceRow = Pick<WebDavWorkspace, 'id' | 'name' | 'slug'> & { metadata: string | null }
 type WorkspaceMatterRow = {
   workspace: WorkspaceRow
   matter: Matter | null
 }
 
+// The caller's own personal space is always mounted at this fixed, URL-safe
+// segment. Its display name ("<name>'s Space") is user-facing text with spaces
+// and punctuation, which made DAV URLs awkward and unstable for sync clients.
+export const PERSONAL_WORKSPACE_SEGMENT = 'personal'
+
 const WEB_DAV_WORKSPACES_CACHE_POLICY: CachePolicy<WebDavWorkspace[]> = {
   namespace: 'webdav-workspaces',
-  version: 1,
+  version: 2,
   ttlMs: 5_000,
   maxEntries: 256,
   distributed: false,
@@ -264,9 +270,15 @@ function buildMatterPath(parent: string, name: string): string {
 }
 
 function findWorkspace(workspaces: WebDavWorkspace[], segment: string): WebDavWorkspace | null {
+  const exact = workspaces.find(
+    (candidate) => candidate.slug === segment || candidate.id === segment || candidate.pathSegment === segment,
+  )
+  if (exact) return exact
+  // Legacy URLs: personal spaces used to be mounted at their display name.
+  // Keep resolving them so already-configured clients do not break.
   return (
     workspaces.find(
-      (candidate) => candidate.slug === segment || candidate.id === segment || candidate.pathSegment === segment,
+      (candidate) => candidate.pathSegment === PERSONAL_WORKSPACE_SEGMENT && candidate.name.trim() === segment,
     ) ?? null
   )
 }
@@ -291,7 +303,7 @@ async function workspaceMatterRow(db: Database, orgId: string, parent: string, n
 
 async function userWorkspaceRows(db: Database, userId: string): Promise<WorkspaceRow[]> {
   return db
-    .select({ id: organization.id, name: organization.name, slug: organization.slug })
+    .select({ id: organization.id, name: organization.name, slug: organization.slug, metadata: organization.metadata })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
@@ -306,7 +318,12 @@ async function userWorkspaceMatterRows(
 ): Promise<WorkspaceMatterRow[]> {
   return db
     .select({
-      workspace: { id: organization.id, name: organization.name, slug: organization.slug },
+      workspace: {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        metadata: organization.metadata,
+      },
       matter: getTableColumns(matters),
     })
     .from(member)
@@ -340,11 +357,12 @@ function toWebDavWorkspaces(rows: WorkspaceRow[]): WebDavWorkspace[] {
     )
     const segment =
       preferredSegments.get(preferredSegment) === 1 && !conflictsWithOtherWorkspace ? preferredSegment : row.slug
-    return { ...row, pathSegment: segment }
+    return { id: row.id, name: row.name, slug: row.slug, pathSegment: segment }
   })
 }
 
 function preferredWorkspaceSegment(row: WorkspaceRow): string {
+  if (isPersonalOrgLike(row)) return PERSONAL_WORKSPACE_SEGMENT
   const name = row.name.trim()
   if (isSafeDavPathSegment(name)) return name
   return row.slug
