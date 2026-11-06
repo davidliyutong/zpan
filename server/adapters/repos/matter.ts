@@ -88,7 +88,35 @@ function typeFilterCondition(typeFilter: string): SQL | undefined {
   }
 }
 
+// D1 rejects any statement that binds more than 100 parameters ("too many SQL
+// variables"). Bulk statements below bind at most four fixed parameters besides
+// the id list, so 90 ids per statement keeps every statement under the limit
+// (same margin as team.ts / quota.ts). Folders synced by WebDAV apps routinely
+// hold hundreds of files, so subtree operations must never bind them all at once.
+const MAX_IDS_PER_STATEMENT = 90
+
+function chunkIds(ids: readonly string[]): string[][] {
+  const unique = [...new Set(ids)]
+  const chunks: string[][] = []
+  for (let index = 0; index < unique.length; index += MAX_IDS_PER_STATEMENT) {
+    chunks.push(unique.slice(index, index + MAX_IDS_PER_STATEMENT))
+  }
+  return chunks
+}
+
 export function createMatterRepo(db: Database): MatterRepo {
+  async function selectByIds(orgId: string, ids: readonly string[]) {
+    const batches = await Promise.all(
+      chunkIds(ids).map((chunk) =>
+        db
+          .select()
+          .from(matters)
+          .where(and(eq(matters.orgId, orgId), inArray(matters.id, chunk), isNull(matters.purgedAt))),
+      ),
+    )
+    return batches.flat()
+  }
+
   const matterChanges = (
     orgId: string,
     ids: string[],
@@ -438,10 +466,7 @@ export function createMatterRepo(db: Database): MatterRepo {
 
     async getMany(orgId, ids) {
       if (ids.length === 0) return []
-      const rows = await db
-        .select()
-        .from(matters)
-        .where(and(eq(matters.orgId, orgId), inArray(matters.id, ids), isNull(matters.purgedAt)))
+      const rows = await selectByIds(orgId, ids)
       return rows.map(toMatter)
     },
 
@@ -590,18 +615,20 @@ export function createMatterRepo(db: Database): MatterRepo {
       // child already trashed earlier keeps its own trashedAt (and restore later).
       await executeWriteTransaction(db, [
         ...matterTrashedProjectionQueries(db, orgId, allIds),
-        db
-          .update(matters)
-          .set({ trashedAt: nowTs, updatedAt: now })
-          .where(
-            and(
-              inArray(matters.id, allIds),
-              eq(matters.orgId, orgId),
-              eq(matters.status, ObjectStatus.ACTIVE),
-              isNull(matters.trashedAt),
-              isNull(matters.purgedAt),
+        ...chunkIds(allIds).map((ids) =>
+          db
+            .update(matters)
+            .set({ trashedAt: nowTs, updatedAt: now })
+            .where(
+              and(
+                inArray(matters.id, ids),
+                eq(matters.orgId, orgId),
+                eq(matters.status, ObjectStatus.ACTIVE),
+                isNull(matters.trashedAt),
+                isNull(matters.purgedAt),
+              ),
             ),
-          ),
+        ),
         ...matterChanges(orgId, allIds, now, 'trashed', 'delete'),
       ])
       const trashed = { ...existing, trashedAt: nowTs, updatedAt: now }
@@ -652,17 +679,19 @@ export function createMatterRepo(db: Database): MatterRepo {
       // Clear the trash mark on the whole subtree (status is already 'active').
       await executeWriteTransaction(db, [
         ...matterRestoredProjectionQueries(db, orgId, allIds),
-        db
-          .update(matters)
-          .set({ trashedAt: null, updatedAt: now })
-          .where(
-            and(
-              inArray(matters.id, allIds),
-              eq(matters.orgId, orgId),
-              isNotNull(matters.trashedAt),
-              isNull(matters.purgedAt),
+        ...chunkIds(allIds).map((ids) =>
+          db
+            .update(matters)
+            .set({ trashedAt: null, updatedAt: now })
+            .where(
+              and(
+                inArray(matters.id, ids),
+                eq(matters.orgId, orgId),
+                isNotNull(matters.trashedAt),
+                isNull(matters.purgedAt),
+              ),
             ),
-          ),
+        ),
         ...matterChanges(orgId, allIds, now, 'restored'),
       ])
 
@@ -675,10 +704,7 @@ export function createMatterRepo(db: Database): MatterRepo {
 
     async purge(orgId, ids): Promise<void> {
       if (ids.length === 0) return
-      const rows = await db
-        .select()
-        .from(matters)
-        .where(and(eq(matters.orgId, orgId), inArray(matters.id, ids), isNull(matters.purgedAt)))
+      const rows = await selectByIds(orgId, ids)
       if (rows.length === 0) return
 
       const now = new Date()
@@ -695,23 +721,16 @@ export function createMatterRepo(db: Database): MatterRepo {
           rows.map((row) => row.id),
         ),
         ...rows.map((row) => matterPurgeLedgerQuery(db, orgId, row.id, now)),
-        db
-          .update(matters)
-          .set({
-            trashedAt: sql`COALESCE(${matters.trashedAt}, ${now.getTime()})`,
-            purgedAt: now.getTime(),
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(matters.orgId, orgId),
-              inArray(
-                matters.id,
-                rows.map((row) => row.id),
-              ),
-              isNull(matters.purgedAt),
-            ),
-          ),
+        ...chunkIds(rows.map((row) => row.id)).map((chunk) =>
+          db
+            .update(matters)
+            .set({
+              trashedAt: sql`COALESCE(${matters.trashedAt}, ${now.getTime()})`,
+              purgedAt: now.getTime(),
+              updatedAt: now,
+            })
+            .where(and(eq(matters.orgId, orgId), inArray(matters.id, chunk), isNull(matters.purgedAt))),
+        ),
         ...matterChanges(
           orgId,
           rows.map((row) => row.id),
@@ -745,17 +764,19 @@ export function createMatterRepo(db: Database): MatterRepo {
       const now = new Date()
       await executeWriteTransaction(db, [
         ...matterTrashedProjectionQueries(db, orgId, ids),
-        db
-          .update(matters)
-          .set({ trashedAt: now.getTime(), updatedAt: now })
-          .where(
-            and(
-              eq(matters.orgId, orgId),
-              inArray(matters.id, ids),
-              isNull(matters.trashedAt),
-              isNull(matters.purgedAt),
+        ...chunkIds(ids).map((chunk) =>
+          db
+            .update(matters)
+            .set({ trashedAt: now.getTime(), updatedAt: now })
+            .where(
+              and(
+                eq(matters.orgId, orgId),
+                inArray(matters.id, chunk),
+                isNull(matters.trashedAt),
+                isNull(matters.purgedAt),
+              ),
             ),
-          ),
+        ),
         ...matterChanges(orgId, ids, now, 'trashed', 'delete'),
       ])
     },
@@ -765,17 +786,19 @@ export function createMatterRepo(db: Database): MatterRepo {
       const now = new Date()
       await executeWriteTransaction(db, [
         ...matterRestoredProjectionQueries(db, orgId, ids),
-        db
-          .update(matters)
-          .set({ trashedAt: null, updatedAt: now })
-          .where(
-            and(
-              eq(matters.orgId, orgId),
-              inArray(matters.id, ids),
-              isNotNull(matters.trashedAt),
-              isNull(matters.purgedAt),
+        ...chunkIds(ids).map((chunk) =>
+          db
+            .update(matters)
+            .set({ trashedAt: null, updatedAt: now })
+            .where(
+              and(
+                eq(matters.orgId, orgId),
+                inArray(matters.id, chunk),
+                isNotNull(matters.trashedAt),
+                isNull(matters.purgedAt),
+              ),
             ),
-          ),
+        ),
         ...matterChanges(orgId, ids, now, 'restored'),
       ])
     },
