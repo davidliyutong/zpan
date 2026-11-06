@@ -4,7 +4,7 @@
 #
 # Differences from upstream:
 #   - account_id pinned (the wrangler login can see several accounts)
-#   - Custom Domain cloud.yutongli.io; workers.dev and preview URLs disabled
+#   - Custom Domains cloud.yutongli.io + dav.cloud.yutongli.io (WebDAV); workers.dev and preview URLs disabled
 #   - BETTER_AUTH_URL pinned to the public origin
 #   - own D1 / KV IDs (upstream hardcodes the author's)
 #   - telemetry cron "0 */12 * * *" removed; ZPAN_TELEMETRY_ALLOW_IP=false
@@ -18,7 +18,13 @@ compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 workers_dev = false
 preview_urls = false
-routes = [{ pattern = "cloud.yutongli.io", custom_domain = true }]
+# dav.cloud.yutongli.io: dedicated WebDAV hostname. It needs a zone Transform Rule
+# (http.host eq "dav.cloud.yutongli.io" -> path concat("/dav", http.request.uri.path)),
+# maintained by hand in the dashboard; see docs/webdav-custom-domain.md.
+routes = [
+  { pattern = "cloud.yutongli.io", custom_domain = true },
+  { pattern = "dav.cloud.yutongli.io", custom_domain = true },
+]
 
 [assets]
 binding = "ASSETS"
