@@ -1,7 +1,24 @@
+# ZPan production Worker — https://cloud.yutongli.io
+#
+# Lives on the `deploy` branch of davidliyutong/zpan; derived from upstream saltbo/zpan wrangler.toml.
+#
+# Differences from upstream:
+#   - account_id pinned (the wrangler login can see several accounts)
+#   - Custom Domain cloud.yutongli.io; workers.dev and preview URLs disabled
+#   - BETTER_AUTH_URL pinned to the public origin
+#   - own D1 / KV IDs (upstream hardcodes the author's)
+#   - telemetry cron "0 */12 * * *" removed; ZPAN_TELEMETRY_ALLOW_IP=false
+#   - env.staging removed
+
 name = "zpan"
+account_id = "6dcf4c92a4c4d0252663ce501ad5dcf3"
 main = "./workers/bootstrap.ts"
 compatibility_date = "2026-04-12"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "cloud.yutongli.io", custom_domain = true }]
 
 [assets]
 binding = "ASSETS"
@@ -23,12 +40,12 @@ run_worker_first = [
 [[d1_databases]]
 binding = "DB"
 database_name = "zpan-db"
-database_id = "5bd64957-fa49-4da0-8b7b-6e0ad84037e7"
+database_id = "122c2195-688c-4e56-9c91-f264cd985002"
 migrations_dir = "./migrations"
 
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "2721f9d7b47d433d8a0e02171e276f57"
+id = "9e340c65fbee4a42be69ea8a1a5a888a"
 
 [[ratelimits]]
 name = "WEBDAV_RATE_LIMITER"
@@ -39,8 +56,10 @@ limit = 3600
 period = 60
 
 [vars]
+BETTER_AUTH_URL = "https://cloud.yutongli.io"
 ZPAN_CLOUD_URL = "https://cloud.zpan.space"
 ZPAN_CACHE_MODE = "distributed"
+ZPAN_TELEMETRY_ALLOW_IP = "false"
 
 [[send_email]]
 name = "EMAIL"
@@ -55,9 +74,8 @@ max_batch_size = 1
 max_batch_timeout = 1
 max_retries = 3
 
-# Self-hosted avatar storage. When present, avatars upload straight to R2 (served from
-# /api/avatar-blobs, or from PUBLIC_IMAGES_URL if an R2 custom domain is configured)
-# instead of the ZPan Cloud avatar service.
+# Avatars / logos. Without this binding ZPan falls back to the ZPan Cloud avatar service.
+# No r2.dev public URL: avatars are served by the Worker at /api/avatar-blobs.
 [[r2_buckets]]
 binding = "PUBLIC_IMAGES"
 bucket_name = "zpan-public-images"
@@ -69,53 +87,6 @@ enabled = true
 enabled = true
 head_sampling_rate = 0.1
 
+# traffic sync | stats rollup | licensing refresh | quota reset | trash purge
 [triggers]
-crons = ["*/10 * * * *", "10 * * * *", "0 */6 * * *", "0 */12 * * *", "0 0 1 * *", "0 4 * * *"]
-
-# ----------------------------------------------------------------------------
-# Staging environment — used by non-production branch builds.
-# CLOUDFLARE_ENV=staging is set automatically in the build script.
-# Workers Builds creates preview versions on the same zpan Worker
-# but with staging D1 binding.
-# ----------------------------------------------------------------------------
-[env.staging]
-
-[env.staging.vars]
-BETTER_AUTH_URL = "https://zpan-staging.saltbo.workers.dev"
-ZPAN_CLOUD_URL = "https://zpan-cloud-staging.saltbo.workers.dev"
-ZPAN_CACHE_MODE = "distributed"
-
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "zpan-db-staging"
-database_id = "a9197d7a-6524-42f0-b646-e714dcb30b3b"
-migrations_dir = "./migrations"
-
-[[env.staging.kv_namespaces]]
-binding = "CACHE_KV"
-id = "7d8625bacbc54e23a46ca4464a9f64a0"
-
-[[env.staging.ratelimits]]
-name = "WEBDAV_RATE_LIMITER"
-namespace_id = "2802"
-
-[env.staging.ratelimits.simple]
-limit = 3600
-period = 60
-
-[[env.staging.r2_buckets]]
-binding = "PUBLIC_IMAGES"
-bucket_name = "zpan-public-images-staging"
-
-[[env.staging.send_email]]
-name = "EMAIL"
-
-[[env.staging.queues.producers]]
-binding = "ARCHIVE_QUEUE"
-queue = "zpan-archive-jobs-staging"
-
-[[env.staging.queues.consumers]]
-queue = "zpan-archive-jobs-staging"
-max_batch_size = 1
-max_batch_timeout = 1
-max_retries = 3
+crons = ["*/10 * * * *", "10 * * * *", "0 */6 * * *", "0 0 1 * *", "0 4 * * *"]
