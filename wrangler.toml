@@ -20,7 +20,8 @@ workers_dev = false
 preview_urls = false
 # dav.cloud.yutongli.io: dedicated WebDAV hostname. It needs a zone Transform Rule
 # (http.host eq "dav.cloud.yutongli.io" -> path concat("/dav", http.request.uri.path)),
-# maintained by hand in the dashboard; see docs/webdav-custom-domain.md.
+# managed by myInfra's zpan/webdav-rule.mjs (upstream buildRewriteRule definition);
+# see docs/webdav-custom-domain.md.
 routes = [
   { pattern = "cloud.yutongli.io", custom_domain = true },
   { pattern = "dav.cloud.yutongli.io", custom_domain = true },
