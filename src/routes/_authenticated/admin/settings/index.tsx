@@ -716,8 +716,11 @@ export function SettingsPage() {
           <Switch
             id="registrationsEnabled"
             checked={registrationsEnabled}
-            disabled={!hasOpenRegistration || registrationMutation.isPending}
+            // Only opening registration is Pro-gated (the API enforces the same rule). A fresh
+            // install defaults to open, so closing it must stay possible without a licence.
+            disabled={registrationMutation.isPending || (!hasOpenRegistration && !registrationsEnabled)}
             onCheckedChange={(checked) => {
+              if (checked && !hasOpenRegistration) return
               form.setValue('registrationsEnabled', checked, { shouldDirty: true })
               registrationMutation.mutate(checked)
             }}
