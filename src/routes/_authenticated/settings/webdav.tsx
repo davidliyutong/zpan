@@ -1,3 +1,4 @@
+import { WEBDAV_PERSONAL_WORKSPACE_SEGMENT } from '@shared/constants'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +15,11 @@ export const Route = createFileRoute('/_authenticated/settings/webdav')({
 
 export function resolveWebDavSettingsUrl(configuredUrl: string, origin: string): string {
   return configuredUrl || `${origin}/dav/`
+}
+
+// The caller's personal space is always mounted at a fixed segment below the server URL.
+export function resolveWebDavPersonalUrl(serverUrl: string): string {
+  return `${serverUrl.replace(/\/+$/, '')}/${WEBDAV_PERSONAL_WORKSPACE_SEGMENT}/`
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -40,6 +46,7 @@ function WebDavSettingsPage() {
   const configuredWebDavUrl = siteConfig?.services.webdav.url ?? ''
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const webDavUrl = resolveWebDavSettingsUrl(configuredWebDavUrl, origin)
+  const personalUrl = resolveWebDavPersonalUrl(webDavUrl)
   const user = session?.user as { email?: string; username?: string } | undefined
   const username = user?.email ?? user?.username ?? ''
 
@@ -68,6 +75,14 @@ function WebDavSettingsPage() {
             <Label>{t('settings.webdav.url')}</Label>
             <code className="min-w-0 break-all rounded-md bg-muted px-3 py-2 text-sm">{webDavUrl}</code>
             <CopyButton value={webDavUrl} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[8rem_1fr_auto] sm:items-center">
+            <Label>{t('settings.webdav.personalUrl')}</Label>
+            <code className="min-w-0 break-all rounded-md bg-muted px-3 py-2 text-sm">{personalUrl}</code>
+            <CopyButton value={personalUrl} />
+            <p className="text-xs text-muted-foreground sm:col-start-2 sm:col-end-4">
+              {t('settings.webdav.personalUrlHint')}
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-[8rem_1fr_auto] sm:items-center">
             <Label>{t('settings.webdav.username')}</Label>

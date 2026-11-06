@@ -1,4 +1,4 @@
-import { ObjectStatus } from '@shared/constants'
+import { ObjectStatus, WEBDAV_PERSONAL_WORKSPACE_SEGMENT } from '@shared/constants'
 import { isPersonalOrgLike } from '@shared/org-slugs'
 import { and, asc, desc, eq, getTableColumns, isNull, or } from 'drizzle-orm'
 import { member, organization } from '../../db/auth-schema'
@@ -19,11 +19,6 @@ type WorkspaceMatterRow = {
   workspace: WorkspaceRow
   matter: Matter | null
 }
-
-// The caller's own personal space is always mounted at this fixed, URL-safe
-// segment. Its display name ("<name>'s Space") is user-facing text with spaces
-// and punctuation, which made DAV URLs awkward and unstable for sync clients.
-export const PERSONAL_WORKSPACE_SEGMENT = 'personal'
 
 const WEB_DAV_WORKSPACES_CACHE_POLICY: CachePolicy<WebDavWorkspace[]> = {
   namespace: 'webdav-workspaces',
@@ -278,7 +273,7 @@ function findWorkspace(workspaces: WebDavWorkspace[], segment: string): WebDavWo
   // Keep resolving them so already-configured clients do not break.
   return (
     workspaces.find(
-      (candidate) => candidate.pathSegment === PERSONAL_WORKSPACE_SEGMENT && candidate.name.trim() === segment,
+      (candidate) => candidate.pathSegment === WEBDAV_PERSONAL_WORKSPACE_SEGMENT && candidate.name.trim() === segment,
     ) ?? null
   )
 }
@@ -362,7 +357,7 @@ function toWebDavWorkspaces(rows: WorkspaceRow[]): WebDavWorkspace[] {
 }
 
 function preferredWorkspaceSegment(row: WorkspaceRow): string {
-  if (isPersonalOrgLike(row)) return PERSONAL_WORKSPACE_SEGMENT
+  if (isPersonalOrgLike(row)) return WEBDAV_PERSONAL_WORKSPACE_SEGMENT
   const name = row.name.trim()
   if (isSafeDavPathSegment(name)) return name
   return row.slug

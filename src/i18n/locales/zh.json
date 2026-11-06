@@ -1188,6 +1188,8 @@
   "settings.webdav.connection.description": "在 Finder、Windows 资源管理器或 Cyberduck 中使用这些信息。",
   "settings.webdav.disabled": "管理员已关闭 WebDAV 服务。",
   "settings.webdav.url": "服务器 URL",
+  "settings.webdav.personalUrl": "个人空间 URL",
+  "settings.webdav.personalUrlHint": "OmniFocus、Zotero 等同步到固定文件夹的应用，请在此地址后加上文件夹路径。",
   "settings.webdav.username": "用户名",
   "settings.webdav.instructions": "使用服务器 URL、用户名和 WebDAV API Key 连接。",
   "settings.webdav.copy": "复制",

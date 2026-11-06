@@ -1188,6 +1188,8 @@
   "settings.webdav.connection.description": "Use these values in Finder, Windows Explorer, or Cyberduck.",
   "settings.webdav.disabled": "WebDAV has been disabled by the administrator.",
   "settings.webdav.url": "Server URL",
+  "settings.webdav.personalUrl": "Personal space URL",
+  "settings.webdav.personalUrlHint": "For apps that sync into a fixed folder, such as OmniFocus or Zotero, append the folder path to this URL.",
   "settings.webdav.username": "Username",
   "settings.webdav.instructions": "Connect to the server URL with your username and a WebDAV API Key.",
   "settings.webdav.copy": "Copy",

@@ -83,3 +83,7 @@ export const FREE_SOCIAL_LOGIN_LIMIT = 1
 // Free plan allows up to this many downloaders per instance.
 // The 2nd downloader requires the downloaders_unlimited feature.
 export const FREE_DOWNLOADER_LIMIT = 1
+
+// WebDAV mounts the caller's own personal space at this fixed, URL-safe path
+// segment instead of its display name ("<name>'s Space").
+export const WEBDAV_PERSONAL_WORKSPACE_SEGMENT = 'personal'
