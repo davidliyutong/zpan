@@ -219,6 +219,24 @@ async function loadProviderConfigs(db: Database): Promise<ProviderConfigs> {
   return configs
 }
 
+// True when a user is being created by the OAuth callback of an enabled,
+// admin-configured OIDC provider. Such sign-ups bypass the site signup mode:
+// the identity provider (and its application access policy) decides who may
+// sign in, while email/password and built-in social sign-ups stay gated.
+// better-call exposes either the route pattern (`/callback/:id`) or the
+// concrete path as ctx.path, so accept both and resolve the provider id from
+// the route params first.
+const OAUTH_CALLBACK_PATH = /\/(?:oauth2\/)?callback\/[^/]+$/
+
+export function isOidcProvisioning(context: unknown, oidcProviderIds: ReadonlySet<string>): boolean {
+  const ctx = context as { path?: unknown; params?: Record<string, unknown> } | null | undefined
+  const path = typeof ctx?.path === 'string' ? ctx.path : ''
+  if (!OAUTH_CALLBACK_PATH.test(path)) return false
+  const fromParams = ctx?.params?.id ?? ctx?.params?.providerId
+  const providerId = typeof fromParams === 'string' ? fromParams : path.slice(path.lastIndexOf('/') + 1)
+  return oidcProviderIds.has(providerId)
+}
+
 // Maps stored captcha config to the better-auth captcha plugin options. Lives
 // here because better-auth's CaptchaOptions type is delivery-framework-specific
 // and may not leak into the framework-free usecases/ layer.
@@ -450,6 +468,7 @@ export async function createAuth(
   const systemOptionsRepo = createSystemOptionsRepo(db)
   const email = createEmailGateway(systemOptionsRepo)
   const providerConfigs = await loadProviderConfigs(rawDb)
+  const oidcProviderIds = new Set(providerConfigs.oidc.map((c) => c.providerId))
   const resourceAudience = baseURL ? `${new URL(baseURL).origin}/api` : undefined
   const oauthProviderOptions = createOAuthProviderOptions({ db, resourceAudience })
   const usesNativeWebDavRateLimit = Boolean(authPlatform.getBinding(WEBDAV_RATE_LIMITER_BINDING))
@@ -816,8 +835,9 @@ export async function createAuth(
           before: async (user, context) => {
             const firstUser = await isFirstUser(db)
 
-            // Registration gate: skip for the very first user so bootstrap works
-            if (!firstUser) {
+            // Registration gate: skip for the very first user so bootstrap works,
+            // and for users provisioned by a configured OIDC provider.
+            if (!firstUser && !isOidcProvisioning(context, oidcProviderIds)) {
               const mode = await getEffectiveSignupMode({
                 systemOptions: createSystemOptionsRepo(db),
                 licenseBinding: createLicenseBindingRepo(db),
